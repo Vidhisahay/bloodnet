@@ -2,9 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from models import Donor, BloodRequest
+from routes import donors
 
-# This creates all tables in PostgreSQL automatically
-# No need to write SQL manually
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -20,6 +19,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register the donors router
+# All routes inside it become available on the main app
+app.include_router(donors.router)
 
 @app.get("/health")
 def health_check():
