@@ -4,6 +4,7 @@ from sqlalchemy import text
 from database import get_db
 from models import BloodRequest
 from schemas import BloodRequestCreate, BloodRequestResponse, VALID_BLOOD_GROUPS
+from cache import get_cached, set_cached, delete_cached, build_cache_key
 from datetime import datetime
 import httpx
 
@@ -45,6 +46,17 @@ def get_nearby_donors(
     radius_km: float = 10,
     db: Session = Depends(get_db)
 ):
+    # Step 1 — Check cache first
+    # If we already searched this request+radius, return instantly
+    cache_key = build_cache_key(request_id, radius_km)
+    cached_result = get_cached(cache_key)
+
+    if cached_result:
+        # Cache hit — return immediately, no DB or ML call needed
+        cached_result["cache"] = "hit"
+        return cached_result
+
+    # Cache miss — do the full search
     blood_request = db.query(BloodRequest).filter(
         BloodRequest.id == request_id
     ).first()
@@ -52,7 +64,7 @@ def get_nearby_donors(
     if not blood_request:
         raise HTTPException(status_code=404, detail="Request not found")
 
-    # Step 1 — geospatial search (Phase 3)
+    # Step 2 — PostGIS geospatial search
     query = text("""
         SELECT
             id, name, blood_group, city,
@@ -90,13 +102,14 @@ def get_nearby_donors(
             "blood_group": blood_request.blood_group,
             "search_radius_km": radius_km,
             "donors_found": 0,
-            "donors": []
+            "donors": [],
+            "cache": "miss"
         }
 
-    # Step 2 — ML scoring (Phase 4)
+    # Step 3 — ML scoring
     now = datetime.utcnow()
-
     ml_payload = {"donors": []}
+
     for donor in donors:
         last_donation = donor.get("last_donation_date")
         days_since = (now - last_donation).days if last_donation else 365
@@ -109,7 +122,6 @@ def get_nearby_donors(
             "hour_of_day": now.hour
         })
 
-    # Call ML service
     try:
         response = httpx.post(
             f"{ML_SERVICE_URL}/score",
@@ -117,12 +129,11 @@ def get_nearby_donors(
             timeout=5.0
         )
         scores = response.json()["scores"]
-    except Exception as e:
-        # If ML service is down, fall back to distance-only ranking
+    except Exception:
         scores = [{"response_probability": 0.5, "score_label": "unknown"}
                   for _ in donors]
 
-    # Step 3 — Merge scores with donor data
+    # Step 4 — Merge and rank
     for i, donor in enumerate(donors):
         donor["id"] = str(donor["id"])
         donor["distance_km"] = round(donor["distance_km"], 2)
@@ -130,13 +141,21 @@ def get_nearby_donors(
         donor["score_label"] = scores[i]["score_label"]
         donor.pop("last_donation_date", None)
 
-    # Step 4 — Re-rank by response probability
     donors.sort(key=lambda x: x["response_probability"], reverse=True)
 
-    return {
+    # Step 5 — Build result and cache it
+    result_data = {
         "request_id": request_id,
         "blood_group": blood_request.blood_group,
         "search_radius_km": radius_km,
         "donors_found": len(donors),
-        "donors": donors
+        "donors": donors,
+        "cache": "miss"   # first time = miss
     }
+
+    # Cache for 5 minutes
+    # Why 5 minutes? Donor availability can change — stale data is risky
+    # in a medical context so we keep TTL short
+    set_cached(cache_key, result_data, ttl_seconds=300)
+
+    return result_data
