@@ -2,19 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from database import get_db
-from models import Donor, BloodRequest
+from models import BloodRequest
 from schemas import BloodRequestCreate, BloodRequestResponse, VALID_BLOOD_GROUPS
-from typing import List
-import json
+from datetime import datetime
+import httpx
 
 router = APIRouter(
     prefix="/requests",
     tags=["Blood Requests"]
 )
 
+ML_SERVICE_URL = "http://localhost:8001"
+
 @router.post("/", response_model=BloodRequestResponse)
 def create_blood_request(request: BloodRequestCreate, db: Session = Depends(get_db)):
-    # Validate blood group
     if request.blood_group not in VALID_BLOOD_GROUPS:
         raise HTTPException(
             status_code=400,
@@ -41,10 +42,9 @@ def create_blood_request(request: BloodRequestCreate, db: Session = Depends(get_
 @router.get("/{request_id}/nearby-donors")
 def get_nearby_donors(
     request_id: str,
-    radius_km: float = 10,  # default search radius = 10km
+    radius_km: float = 10,
     db: Session = Depends(get_db)
 ):
-    # Fetch the blood request
     blood_request = db.query(BloodRequest).filter(
         BloodRequest.id == request_id
     ).first()
@@ -52,27 +52,19 @@ def get_nearby_donors(
     if not blood_request:
         raise HTTPException(status_code=404, detail="Request not found")
 
-    # This is the PostGIS magic
-    # ST_DWithin checks if two geography points are within a distance
-    # ST_MakePoint creates a geography point from lng, lat
-    # Notice: PostGIS uses longitude FIRST, then latitude
-    # 1000 * radius_km converts km to meters (PostGIS uses meters)
+    # Step 1 — geospatial search (Phase 3)
     query = text("""
-        SELECT 
-            id,
-            name,
-            blood_group,
-            city,
-            is_available,
-            total_donations,
-            latitude,
-            longitude,
+        SELECT
+            id, name, blood_group, city,
+            is_available, total_donations,
+            latitude, longitude,
+            last_donation_date,
             ST_Distance(
                 location,
                 ST_MakePoint(:lng, :lat)::geography
             ) / 1000 AS distance_km
         FROM donors
-        WHERE 
+        WHERE
             blood_group = :blood_group
             AND is_available = true
             AND ST_DWithin(
@@ -90,19 +82,56 @@ def get_nearby_donors(
         "radius_meters": radius_km * 1000
     })
 
-    donors = []
-    for row in result.mappings():
-        donors.append({
-            "id": str(row["id"]),
-            "name": row["name"],
-            "blood_group": row["blood_group"],
-            "city": row["city"],
-            "is_available": row["is_available"],
-            "total_donations": row["total_donations"],
-            "latitude": row["latitude"],
-            "longitude": row["longitude"],
-            "distance_km": round(row["distance_km"], 2)
+    donors = [dict(row) for row in result.mappings()]
+
+    if not donors:
+        return {
+            "request_id": request_id,
+            "blood_group": blood_request.blood_group,
+            "search_radius_km": radius_km,
+            "donors_found": 0,
+            "donors": []
+        }
+
+    # Step 2 — ML scoring (Phase 4)
+    now = datetime.utcnow()
+
+    ml_payload = {"donors": []}
+    for donor in donors:
+        last_donation = donor.get("last_donation_date")
+        days_since = (now - last_donation).days if last_donation else 365
+
+        ml_payload["donors"].append({
+            "distance_km": donor["distance_km"],
+            "total_donations": donor["total_donations"],
+            "is_available": donor["is_available"],
+            "days_since_last_donation": float(days_since),
+            "hour_of_day": now.hour
         })
+
+    # Call ML service
+    try:
+        response = httpx.post(
+            f"{ML_SERVICE_URL}/score",
+            json=ml_payload,
+            timeout=5.0
+        )
+        scores = response.json()["scores"]
+    except Exception as e:
+        # If ML service is down, fall back to distance-only ranking
+        scores = [{"response_probability": 0.5, "score_label": "unknown"}
+                  for _ in donors]
+
+    # Step 3 — Merge scores with donor data
+    for i, donor in enumerate(donors):
+        donor["id"] = str(donor["id"])
+        donor["distance_km"] = round(donor["distance_km"], 2)
+        donor["response_probability"] = scores[i]["response_probability"]
+        donor["score_label"] = scores[i]["score_label"]
+        donor.pop("last_donation_date", None)
+
+    # Step 4 — Re-rank by response probability
+    donors.sort(key=lambda x: x["response_probability"], reverse=True)
 
     return {
         "request_id": request_id,
