@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from models import Donor, BloodRequest
-from routes import donors
+from routes import donors, requests as blood_requests
 
 Base.metadata.create_all(bind=engine)
 
@@ -20,9 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register the donors router
-# All routes inside it become available on the main app
 app.include_router(donors.router)
+app.include_router(blood_requests.router)
 
 @app.get("/health")
 def health_check():
@@ -35,7 +34,4 @@ def health_check():
                 "database": "connected"
             }
     except Exception as e:
-        return {
-            "status": "online",
-            "database": f"error: {str(e)}"
-        }
+        return {"status": "online", "database": f"error: {str(e)}"}
