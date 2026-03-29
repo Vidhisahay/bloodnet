@@ -7,13 +7,14 @@ from schemas import BloodRequestCreate, BloodRequestResponse, VALID_BLOOD_GROUPS
 from cache import get_cached, set_cached, delete_cached, build_cache_key
 from datetime import datetime
 import httpx
+import os
 
 router = APIRouter(
     prefix="/requests",
     tags=["Blood Requests"]
 )
 
-ML_SERVICE_URL = "http://localhost:8001"
+ML_SERVICE_URL = os.getenv("ML_SERVICE_URL", "http://localhost:8001")
 
 @router.post("/", response_model=BloodRequestResponse)
 def create_blood_request(request: BloodRequestCreate, db: Session = Depends(get_db)):
