@@ -11,8 +11,9 @@ function ScoreBadge({ label }) {
     low: 'bg-gray-50 text-gray-500',
     unknown: 'bg-gray-50 text-gray-400'
   }
+  const cls = colors[label] || colors.unknown
   return (
-    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${colors[label] || colors.unknown}`}>
+    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${cls}`}>
       {label}
     </span>
   )
@@ -21,6 +22,8 @@ function ScoreBadge({ label }) {
 function DonorCard({ donor, rank }) {
   return (
     <div className={`bg-white border rounded-2xl p-6 transition-all ${rank === 0 ? 'border-blood-200 shadow-sm' : 'border-gray-100'}`}>
+
+      {/* Top row — name + blood group */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${rank === 0 ? 'bg-blood-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
@@ -36,6 +39,7 @@ function DonorCard({ donor, rank }) {
         </div>
       </div>
 
+      {/* Stats row */}
       <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-50">
         <div>
           <div className="text-xs text-gray-400 mb-1">Distance</div>
@@ -51,6 +55,16 @@ function DonorCard({ donor, rank }) {
         </div>
       </div>
 
+      {/* Contact row */}
+      <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between">
+        <div>
+          <div className="text-xs text-gray-400 mb-1">Contact</div>
+          <div className="text-sm font-semibold text-gray-900">{donor.phone}</div>
+        </div>
+        <a href={"tel:" + donor.phone} className="bg-blood-500 hover:bg-blood-600 text-white text-xs font-medium px-4 py-2 rounded-full transition-colors">Call donor</a>
+      </div>
+
+      {/* Top match label */}
       {rank === 0 && (
         <div className="mt-4 pt-4 border-t border-gray-50">
           <span className="text-xs text-blood-500 font-medium">Top match — highest response probability</span>
@@ -146,7 +160,7 @@ export default function Match() {
 
         {/* Error */}
         {error && (
-          <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600">
+          <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-600 mb-4">
             {error}
           </div>
         )}

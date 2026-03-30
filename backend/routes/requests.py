@@ -68,7 +68,7 @@ def get_nearby_donors(
     # Step 2 — PostGIS geospatial search
     query = text("""
         SELECT
-            id, name, blood_group, city,
+            id, name, phone, blood_group, city,
             is_available, total_donations,
             latitude, longitude,
             last_donation_date,
