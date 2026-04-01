@@ -1,1 +1,279 @@
-"# BloodNet" 
+# BloodNet - Intelligent Blood Donor Matching System
+
+> Real-time blood donor matching using geospatial search, machine learning, and Redis caching. Built with FastAPI, PostgreSQL + PostGIS, XGBoost, Redis, React, and Docker.
+
+
+## Live Demo
+
+- **Frontend:** *(Vercel link)*
+- **API Docs:** *(Render link)*
+
+
+## What it does
+
+BloodNet matches blood donors to patients intelligently - not just by proximity, but by predicted likelihood of response. When a hospital creates a blood request, the system:
+
+1. Runs a **PostGIS geospatial query** to find all available donors with matching blood group within a configurable radius
+2. Sends the candidates to a **separate ML microservice** which scores each donor using an XGBoost model
+3. **Re-ranks donors** by response probability and returns the sorted list with distance, score, and contact info
+4. **Caches results in Redis** with a 5-minute TTL - repeated searches return instantly
+
+
+## Architecture
+
+```
+React Frontend (Vercel)
+        ↓
+FastAPI Backend (Render) ←→ Redis Cache
+        ↓                        ↓
+PostgreSQL + PostGIS      ML Service / XGBoost (Render)
+     (Supabase)
+```
+
+### Why this architecture?
+
+- **Separate ML microservice** - the model can be retrained and redeployed independently without touching the main API. Standard MLOps pattern.
+- **PostGIS over app-level filtering** - spatial filtering inside the database is O(log n) using spatial indexes. Pulling all donors and filtering in Python would be O(n).
+- **Redis caching with short TTL** - donor availability changes frequently in a medical context, so we cache aggressively (5 minutes) but not permanently.
+- **Geography type (SRID 4326)** - uses spherical Earth model for accurate distances anywhere in India, not flat 2D geometry.
+
+
+
+## Tech Stack
+
+| Layer | Technology | Why |
+|-------|-----------|-----|
+| Backend API | FastAPI + Python | Auto-generated Swagger docs, built-in validation, async support |
+| Database | PostgreSQL + PostGIS | Geospatial queries with ST_DWithin, ST_Distance |
+| ML Service | FastAPI + XGBoost | Tabular data prediction, separate deployable service |
+| Cache | Redis | Sub-millisecond cache hits, TTL-based expiry |
+| ORM | SQLAlchemy | Type-safe DB access, declarative models |
+| Validation | Pydantic | Request/response schema separation, auto validation |
+| Frontend | React + Vite + Tailwind CSS | Fast build, utility-first styling |
+| Routing | React Router | Client-side navigation |
+| HTTP Client | Axios | API calls from frontend |
+| Containerization | Docker + Docker Compose | One-command local setup |
+| Hosting | Render + Supabase + Vercel | Free tier, production-grade |
+
+
+
+## Key Technical Features
+
+### Geospatial Search (PostGIS)
+
+```sql
+SELECT id, name, phone, blood_group, city,
+    ST_Distance(location, ST_MakePoint(:lng, :lat)::geography) / 1000 AS distance_km
+FROM donors
+WHERE blood_group = :blood_group
+  AND is_available = true
+  AND ST_DWithin(
+      location,
+      ST_MakePoint(:lng, :lat)::geography,
+      :radius_meters
+  )
+ORDER BY distance_km ASC
+```
+
+- Uses `Geography` type with `SRID=4326` (WGS84 - standard GPS coordinate system)
+- `ST_DWithin` uses spatial index automatically - efficient at scale
+- `ST_Distance` returns meters, divided by 1000 for kilometers
+- Note: PostGIS uses `longitude, latitude` order (opposite to common convention)
+
+### ML Scoring (XGBoost)
+
+Features used for donor response prediction:
+
+| Feature | Importance | Reasoning |
+|---------|-----------|-----------|
+| is_available | 78.9% | Unavailable donor will never respond |
+| distance_km | 13.1% | Closer donors more likely to respond |
+| days_since_last_donation | 3.5% | Recently donated = needs rest |
+| total_donations | 3.2% | Experienced donors more reliable |
+| hour_of_day | 1.4% | Time of day affects reachability |
+
+Model accuracy: **92%** on held-out test set (80/20 split, 5000 synthetic samples).
+
+### Redis Caching
+
+```python
+cache_key = f"nearby_donors:{request_id}:radius:{radius_km}"
+cached_result = get_cached(cache_key)
+
+if cached_result:
+    cached_result["cache"] = "hit"
+    return cached_result  # instant return, no DB or ML call
+
+# ... full search ...
+set_cached(cache_key, result_data, ttl_seconds=300)  # 5 min TTL
+```
+
+Responses include `"cache": "hit"` or `"cache": "miss"` for transparency.
+
+### Graceful Degradation
+
+If the ML service is unavailable, the system falls back to distance-only ranking - the core feature never breaks due to a secondary service failure.
+
+
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|---------|-------------|
+| GET | `/health` | System health check with DB status |
+| POST | `/donors/register` | Register a new donor |
+| GET | `/donors/` | List all donors |
+| POST | `/requests/` | Create a blood request |
+| GET | `/requests/{id}/nearby-donors` | Get ranked donors for a request |
+
+Full interactive docs available at `/docs` (Swagger UI, auto-generated by FastAPI).
+
+
+
+## Data Model
+
+### Donors Table
+```
+id            UUID (primary key)
+name          String
+email         String (unique)
+phone         String
+blood_group   String (A+, A-, B+, B-, O+, O-, AB+, AB-)
+location      Geography (PostGIS POINT, SRID 4326)
+latitude      Float
+longitude     Float
+city          String
+is_available  Boolean
+total_donations Integer
+last_donation_date DateTime
+created_at    DateTime
+```
+
+### Blood Requests Table
+```
+id            UUID (primary key)
+patient_name  String
+hospital_name String
+blood_group   String
+units_needed  Float
+latitude      Float
+longitude     Float
+city          String
+urgency       String (normal / urgent / critical)
+status        String (pending / matched / fulfilled)
+created_at    DateTime
+```
+
+---
+
+## Running Locally
+
+### Option 1 - Docker Compose (recommended)
+
+```bash
+git clone https://github.com/YOUR_USERNAME/bloodnet.git
+cd bloodnet
+docker-compose up --build
+```
+
+Services start automatically:
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8000`
+- API Docs: `http://localhost:8000/docs`
+- ML Service: `http://localhost:8001`
+
+### Option 2 - Manual setup
+
+**Prerequisites:** Python 3.11+, Node.js 18+, PostgreSQL 15+ with PostGIS, Redis
+
+```bash
+# 1. Clone repo
+git clone https://github.com/YOUR_USERNAME/bloodnet.git
+cd bloodnet
+
+# 2. Backend setup
+cd backend
+pip install -r requirements.txt
+cp .env.example .env   # add your DATABASE_URL and REDIS_HOST
+uvicorn main:app --reload
+
+# 3. ML Service setup (new terminal)
+cd ml_service
+pip install -r requirements.txt
+python train_model.py   # trains and saves model.pkl
+uvicorn main:app --reload --port 8001
+
+# 4. Frontend setup (new terminal)
+cd frontend
+npm install
+npm run dev
+
+# 5. Seed data (optional)
+cd backend
+python seed.py
+```
+
+### Environment Variables
+
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/bloodnet
+REDIS_HOST=localhost
+REDIS_PORT=6379
+ML_SERVICE_URL=http://localhost:8001
+SECRET_KEY=your-secret-key
+```
+
+---
+
+## Project Structure
+
+```
+bloodnet/
+├── backend/
+│   ├── main.py              # FastAPI app, CORS, router registration
+│   ├── database.py          # SQLAlchemy engine, session, Base
+│   ├── schemas.py           # Pydantic request/response models
+│   ├── seed.py              # Seed script - 80+ donors across 8 cities
+│   ├── cache.py             # Redis cache helpers (get, set, delete)
+│   ├── models/
+│   │   ├── donor.py         # Donor SQLAlchemy model with PostGIS Geography
+│   │   └── request.py       # BloodRequest SQLAlchemy model
+│   ├── routes/
+│   │   ├── donors.py        # /donors endpoints
+│   │   └── requests.py      # /requests endpoints + geospatial + ML integration
+│   ├── requirements.txt
+│   └── Dockerfile
+├── ml_service/
+│   ├── main.py              # FastAPI ML service, /score endpoint
+│   ├── train_model.py       # XGBoost training, synthetic data generation
+│   ├── model.pkl            # Trained model (generated at build time)
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── Landing.jsx  # Hero, stats, how it works, features, CTA
+│   │   │   ├── Register.jsx # Donor registration form
+│   │   │   ├── Request.jsx  # Blood request form
+│   │   │   └── Match.jsx    # Match results with donor cards + ML scores
+│   │   ├── App.jsx          # Router setup
+│   │   └── main.jsx         # Entry point
+│   └── package.json
+└── docker-compose.yml       # PostgreSQL + PostGIS + Redis + backend + ML service
+```
+
+
+## Future Improvement
+
+- JWT authentication for donors and hospitals
+- Real-time notifications (WebSockets or Firebase) when a donor is matched
+- Donor availability toggle from mobile
+- Blood request status tracking (pending → matched → fulfilled)
+- Admin dashboard with city-level heatmaps
+- MLflow for model versioning and experiment tracking
+- Replace synthetic training data with real response history
+
+
+## Author
+
+Made with ❤️ by Vidhi - [GitHub](https://github.com/Vidhisahay) · [LinkedIn](https://www.linkedin.com/in/vidhisahay/)
