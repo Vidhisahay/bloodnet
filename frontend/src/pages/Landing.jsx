@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-const NAV_LINKS = ['How it works', 'For donors', 'For hospitals', 'API']
+const NAV_LINKS = [
+  { label: 'How it works', href: '#how-it-works' },
+  { label: 'For donors', href: '#features' },
+  { label: 'For hospitals', href: '#features' },
+  { label: 'API', href: 'http://localhost:8000/docs', external: true },
+]
 
 const STATS = [
   { value: '8', label: 'Blood types matched' },
@@ -63,7 +68,15 @@ export default function Landing() {
           </div>
           <div className="hidden md:flex items-center gap-8">
             {NAV_LINKS.map(l => (
-              <a key={l} href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">{l}</a>
+              l.external
+                ? <a key={l.label} href={l.href} target="_blank" rel="noreferrer"
+                    className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+                    {l.label}
+                  </a>
+                : <a key={l.label} href={l.href}
+                    className="text-sm text-gray-500 hover:text-gray-900 transition-colors">
+                    {l.label}
+                  </a>
             ))}
           </div>
           <div className="flex items-center gap-3">
@@ -135,7 +148,7 @@ export default function Landing() {
       </section>
 
       {/* How it works */}
-      <section className="py-24 px-6">
+      <section id="how-it-works" className="py-24 px-6">
         <div className="max-w-6xl mx-auto">
           <div className="mb-16">
             <p className="text-xs text-blood-500 uppercase tracking-widest mb-3 font-medium">How it works</p>
@@ -159,7 +172,7 @@ export default function Landing() {
       </section>
 
       {/* Features */}
-      <section className="py-24 px-6 bg-gray-50">
+      <section id="features" className="py-24 px-6 bg-gray-50">
         <div className="max-w-6xl mx-auto">
           <div className="mb-16">
             <p className="text-xs text-blood-500 uppercase tracking-widest mb-3 font-medium">Core features</p>

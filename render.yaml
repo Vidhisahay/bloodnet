@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: bloodnet-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: ML_SERVICE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+
+  - type: web
+    name: bloodnet-ml
+    runtime: python
+    rootDir: ml_service
+    buildCommand: pip install -r requirements.txt && python train_model.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
