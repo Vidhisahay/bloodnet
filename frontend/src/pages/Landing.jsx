@@ -48,7 +48,7 @@ export default function Landing() {
   const [apiStatus, setApiStatus] = useState('checking')
 
   useEffect(() => {
-    fetch(import.meta.env.VITE_API_URL + '/health' || 'http://localhost:8000/health')
+    fetch((import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/health')
       .then(r => r.json())
       .then(d => setApiStatus(d.database === 'connected' ? 'online' : 'degraded'))
       .catch(() => setApiStatus('offline'))
