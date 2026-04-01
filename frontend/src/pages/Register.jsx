@@ -4,7 +4,8 @@ import axios from 'axios'
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
 
-const API = 'http://localhost:8000'
+import config from '../config'
+const API = config.API_URL
 
 export default function Register() {
   const navigate = useNavigate()

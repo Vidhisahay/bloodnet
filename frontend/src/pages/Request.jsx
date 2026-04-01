@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
-const API = 'http://localhost:8000'
+
+import config from '../config'
+const API = config.API_URL
 
 export default function Request() {
   const navigate = useNavigate()

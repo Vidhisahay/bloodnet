@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
-const API = 'http://localhost:8000'
+import config from '../config'
+const API = config.API_URL
 
 function ScoreBadge({ label }) {
   const colors = {
