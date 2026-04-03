@@ -5,8 +5,8 @@
 
 ## Live Demo
 
-- **Frontend:** *(Vercel link)*
-- **API Docs:** *(Render link)*
+- **Frontend:** https://bloodnet-wheat.vercel.app/
+- **API Docs:** https://bloodnet-backend-iy18.onrender.com/docs
 
 
 ## What it does
